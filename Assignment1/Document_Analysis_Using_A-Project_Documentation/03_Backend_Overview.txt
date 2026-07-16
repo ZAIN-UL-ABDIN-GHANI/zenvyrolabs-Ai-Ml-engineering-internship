@@ -1,0 +1,56 @@
+BACKEND OVERVIEW
+
+Backend framework
+- Flask is the backend framework used in app.py.
+- flask_cors.CORS is enabled on the Flask app.
+
+Entry point
+- app.py is the executable entry point.
+- The __main__ block runs the server with debug=True on port 5000.
+
+Folder organization
+- app.py contains the Flask application and route definitions.
+- services/aiService.py contains the local LLM debate conductor class.
+- services/mlJudge.py contains the regression judge class.
+- README.md describes the intended backend implementation and setup.
+
+API routes
+- POST /api/debate/start
+  - Reads request.json and expects a topic field.
+  - Returns a JSON object with status and topic.
+- POST /api/debate/next-turn
+  - Reads request.json and expects topic, last_speaker, and last_message from the frontend.
+  - Returns a placeholder JSON response indicating turn execution is pending.
+- POST /api/machine-learning/train
+  - Calls ml_judge.train_model("historical_debates.csv").
+  - Returns training status and metrics or a 500 error message.
+- POST /api/machine-learning/evaluate
+  - Reads advocate_text and challenger_text from request.json.
+  - Returns a placeholder JSON response with pending winner and zeroed scores.
+
+Services
+- DebateConductor is instantiated from services/aiService.py.
+- DebateRegressionJudge is instantiated from services/mlJudge.py.
+- The conductor is intended to generate agent A and agent B responses using a local LLM.
+- The ML judge is intended to train and score debate arguments.
+
+Utilities
+- No separate utility folder or utility modules were found.
+- CORS is used as the only explicit backend helper outside the service classes.
+
+Configuration files
+- No .env file, requirements.txt file, or other backend configuration file was found in the repository.
+- Runtime configuration is hardcoded in app.py and services/aiService.py.
+
+Data flow
+- The frontend sends JSON POST requests to Flask endpoints.
+- app.py receives the requests and returns JSON responses.
+- The /api/debate/* routes are wired for debate orchestration.
+- The /api/machine-learning/* routes are wired for model training and evaluation.
+- aiService.py is intended to call a local LLM endpoint and maintain debate history.
+- mlJudge.py is intended to convert text into features, train a regression model, and predict scores.
+
+External integrations
+- Local Ollama is referenced in services/aiService.py.
+- The configured Ollama endpoint is http://localhost:11434/api/generate.
+- README.md also references local LLM runners as an intended dependency.

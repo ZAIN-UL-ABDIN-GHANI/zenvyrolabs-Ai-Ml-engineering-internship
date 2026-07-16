@@ -1,0 +1,28 @@
+CONFIGURATION
+
+Environment variables
+- Not found in the project.
+
+Configuration files
+- Not found in the project.
+
+Ports
+- Flask server port: 5000.
+- Local Ollama port referenced in code: 11434.
+
+URLs
+- Backend API base used by the frontend: http://127.0.0.1:5000/api/debate.
+- Local Ollama generation endpoint: http://localhost:11434/api/generate.
+
+Model names
+- mistral is configured in services/aiService.py.
+- No other active model name is configured in code.
+
+Database configuration
+- Not found in the project.
+
+API endpoints
+- /api/debate/start
+- /api/debate/next-turn
+- /api/machine-learning/train
+- /api/machine-learning/evaluate
