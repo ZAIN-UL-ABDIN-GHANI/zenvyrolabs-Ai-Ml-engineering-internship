@@ -1,0 +1,85 @@
+FILE-BY-FILE ANALYSIS
+
+1) File name: app.py
+   File path: app.py
+   File type: Python
+   Purpose: Flask backend application and API route definition.
+   Short description: Creates the Flask app, enables CORS, initializes service objects, and exposes debate and machine-learning POST endpoints.
+   Related files: services/aiService.py, services/mlJudge.py, frontend/js/app.js, README.md
+
+2) File name: README.md
+   File path: README.md
+   File type: Markdown
+   Purpose: Project description and implementation guide.
+   Short description: Describes the AI Debate Chamber objective, setup instructions, backend expectations, and grading rubric.
+   Related files: app.py, services/aiService.py, services/mlJudge.py, frontend/index.html, frontend/demo.html
+
+3) File name: logo.jpeg
+   File path: logo.jpeg
+   File type: Image
+   Purpose: Branding image asset.
+   Short description: Root-level logo image showing the Zenvyro Labs style mark.
+   Related files: frontend/logo.png, frontend/index.html, frontend/demo.html
+
+4) File name: frontend/demo.html
+   File path: frontend/demo.html
+   File type: HTML
+   Purpose: Standalone simulation page.
+   Short description: Static frontend demo with debate layout, timer, judge overlay, and demo script wiring.
+   Related files: frontend/js/demo.js, frontend/css/demo.css, frontend/logo.png
+
+5) File name: frontend/index.html
+   File path: frontend/index.html
+   File type: HTML
+   Purpose: Production-style frontend page for backend integration.
+   Short description: UI shell for the backend-connected debate flow with topic input, agent panels, and status controls.
+   Related files: frontend/js/app.js, frontend/css/demo.css, frontend/logo.png, app.py
+
+6) File name: frontend/logo.png
+   File path: frontend/logo.png
+   File type: Image
+   Purpose: Frontend branding image asset.
+   Short description: Logo displayed in both HTML pages.
+   Related files: frontend/index.html, frontend/demo.html
+
+7) File name: frontend/css/demo.css
+   File path: frontend/css/demo.css
+   File type: CSS
+   Purpose: Styling for the demo and production frontends.
+   Short description: Defines the visual design for top bar, arena, feeds, typing indicator, status bar, and judge overlay.
+   Related files: frontend/demo.html, frontend/index.html
+
+8) File name: frontend/css/styles.css
+   File path: frontend/css/styles.css
+   File type: CSS
+   Purpose: Additional or alternate styling file.
+   Short description: Contains a second style system with older class names and judge modal styling.
+   Related files: frontend/index.html, frontend/demo.html
+
+9) File name: frontend/js/app.js
+   File path: frontend/js/app.js
+   File type: JavaScript
+   Purpose: Backend-connected frontend interaction logic.
+   Short description: Sends debate start and next-turn requests to the Flask API, updates the UI, and renders agent messages.
+   Related files: app.py, frontend/index.html
+
+10) File name: frontend/js/demo.js
+    File path: frontend/js/demo.js
+    File type: JavaScript
+    Purpose: Standalone demo simulation logic.
+    Short description: Runs a timed local debate simulation with preset arguments, animations, and a mock judge overlay.
+    Related files: frontend/demo.html, frontend/css/demo.css
+
+11) File name: services/aiService.py
+    File path: services/aiService.py
+    File type: Python
+    Purpose: Local LLM debate service layer.
+    Short description: Defines DebateConductor, local Ollama configuration, debate history storage, and response-generation methods for two agents.
+    Related files: app.py, README.md
+
+12) File name: services/mlJudge.py
+    File path: services/mlJudge.py
+    File type: Python
+    Purpose: Machine-learning scoring service.
+    Short description: Defines DebateRegressionJudge, text feature extraction, training logic, and prediction logic for debate scoring.
+    Related files: app.py, README.md
