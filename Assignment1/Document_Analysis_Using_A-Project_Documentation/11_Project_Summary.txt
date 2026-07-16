@@ -1,0 +1,40 @@
+PROJECT SUMMARY
+
+Project name
+- AI Debate Chamber
+
+Purpose
+- The project is structured as a debate simulation system with a Flask backend, a frontend UI, a local LLM-based debate service, and a regression-based machine-learning judge.
+
+Technologies used
+- Python
+- Flask
+- Flask-CORS
+- requests
+- pandas
+- numpy
+- HTML
+- CSS
+- JavaScript
+- Google Fonts Inter
+- Local Ollama integration as referenced in code
+- Scikit-Learn as referenced in README.md and comments
+
+Main modules
+- app.py provides the Flask API routes.
+- services/aiService.py defines the debate conductor and local LLM settings.
+- services/mlJudge.py defines the ML judge and feature extraction hooks.
+- frontend/index.html and frontend/js/app.js provide the backend-connected UI.
+- frontend/demo.html and frontend/js/demo.js provide the standalone mock simulation.
+
+Folder structure overview
+- Root level contains the backend entry point, the README, and a logo image.
+- frontend/ contains the HTML, CSS, JavaScript, and frontend logo asset.
+- services/ contains the AI and ML backend service modules.
+- Project_Documentation/ contains the extracted documentation text files.
+
+Overall architecture
+- The project is organized as a small Flask API backend plus a browser-based frontend.
+- The backend is intended to orchestrate local LLM debate turns and ML scoring.
+- The frontend sends debate requests to the backend and renders the conversation state.
+- The demo page provides a separate self-contained simulation that does not depend on the backend.
