@@ -1,0 +1,29 @@
+API DOCUMENTATION
+
+1) URL: /api/debate/start
+   HTTP method: POST
+   Parameters: None documented as URL parameters.
+   Request body: JSON object with topic.
+   Response: JSON object with status and topic.
+   Purpose: Initializes a debate session.
+
+2) URL: /api/debate/next-turn
+   HTTP method: POST
+   Parameters: None documented as URL parameters.
+   Request body: JSON object with topic, last_speaker, and last_message.
+   Response: JSON object with message.
+   Purpose: Triggers the next debate turn.
+
+3) URL: /api/machine-learning/train
+   HTTP method: POST
+   Parameters: None documented as URL parameters.
+   Request body: Not found in the project.
+   Response: JSON object with status and metrics, or a JSON error with HTTP 500.
+   Purpose: Triggers the training routine for the regression judge.
+
+4) URL: /api/machine-learning/evaluate
+   HTTP method: POST
+   Parameters: None documented as URL parameters.
+   Request body: JSON object with advocate_text and challenger_text.
+   Response: JSON object with winner, advocate_score, and challenger_score.
+   Purpose: Evaluates debate arguments with the machine-learning judge.
