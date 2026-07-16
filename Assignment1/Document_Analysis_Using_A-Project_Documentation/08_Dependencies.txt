@@ -1,0 +1,35 @@
+DEPENDENCIES
+
+Libraries and frameworks found in imports or project files
+
+- Flask
+  - Found in app.py as from flask import Flask, request, jsonify.
+  - Used to create the backend web application and define routes.
+
+- flask-cors
+  - Found in app.py as from flask_cors import CORS.
+  - Used to enable cross-origin requests from the frontend.
+
+- requests
+  - Found in services/aiService.py.
+  - Intended for calling the local LLM endpoint over HTTP.
+
+- pandas
+  - Found in services/mlJudge.py.
+  - Intended for loading and processing debate training data.
+
+- numpy
+  - Found in services/mlJudge.py.
+  - Intended for numerical work in the ML judge module.
+
+- scikit-learn
+  - Referenced in README.md and comments in services/mlJudge.py and frontend/demo.html.
+  - Intended for regression training and evaluation, but not imported in the current code.
+
+- Google Fonts Inter
+  - Found in frontend/index.html and frontend/demo.html through a Google Fonts stylesheet link.
+  - Used as the frontend typeface.
+
+Files mentioned but not present
+- requirements.txt was not found in the repository.
+- No dependency lock file was found.
