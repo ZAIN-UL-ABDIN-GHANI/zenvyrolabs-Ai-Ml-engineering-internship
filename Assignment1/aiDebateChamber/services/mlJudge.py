@@ -1,46 +1,29 @@
-"""
-services/mlJudge.py
+"""Regression judge for the Autonomous AI Debate Chamber.
 
-Machine-learning scoring service for the Autonomous AI Debate Chamber.
+This module provides two pieces of functionality:
+- feature extraction for debate text
+- a scikit-learn regression judge that scores each argument and compares two
+  arguments to determine a winner
 
-Responsibilities
------------------
-1. Convert raw debate-argument text into a fixed set of numeric linguistic
-   features (word count, lexical diversity, readability, etc.).
-2. Train a RandomForestRegressor on `data/historical_debates.csv` to predict
-   a human-style quality score (1-10) from those features.
-3. Score live debate turns and decide a winner between the advocate (Agent A)
-   and challenger (Agent B) sides.
-
-Design note on feature consistency
------------------------------------
-`extract_features()` is the single source of truth for turning text into a
-feature vector. It is used both by `data/generate_historical_debates.py`
-(indirectly, via the same formulas) and by `predict_score()` at inference
-time, so the regressor always sees the same schema, in the same order, that
-it was trained on. Mismatched train/predict feature sets is the most common
-way this kind of pipeline silently breaks, so `FEATURE_COLUMNS` is the only
-place that ordering is defined.
+The training schema matches the bundled CSV at data/historical_debates.csv.
 """
 from __future__ import annotations
 
-import logging
+import math
 import os
-import pickle
 import re
-from typing import Dict, List, Optional
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional
 
 import pandas as pd
 from sklearn.ensemble import RandomForestRegressor
-from sklearn.metrics import mean_squared_error, r2_score
+from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 
-logger = logging.getLogger(__name__)
+_MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+_PROJECT_ROOT = os.path.dirname(_MODULE_DIR)
 
-# Canonical feature order. Training (train_model) and inference (predict_score)
-# both select columns using this exact list, so column order can never drift
-# between the two.
-FEATURE_COLUMNS: List[str] = [
+FEATURE_COLUMNS = [
     "word_count",
     "sentence_count",
     "average_sentence_length",
@@ -56,353 +39,291 @@ FEATURE_COLUMNS: List[str] = [
 ]
 TARGET_COLUMN = "human_score"
 
+_WORD_RE = re.compile(r"[A-Za-z0-9']+")
+_SENTENCE_RE = re.compile(r"[^.!?]+[.!?]?")
+_PUNCTUATION_RE = re.compile(r"[.,!?;:()\-\"'\[\]{}]")
+_VOWELS = set("aeiouy")
 
-class DatasetError(Exception):
-    """Raised when the historical dataset is missing, unreadable, or malformed."""
+_POSITIVE_MARKERS = {
+    "evidence",
+    "clearly",
+    "undoubtedly",
+    "therefore",
+    "because",
+    "consistently",
+    "advantage",
+    "rigor",
+    "strong",
+    "must",
+    "should",
+    "important",
+    "benefit",
+    "benefits",
+    "improve",
+    "effective",
+}
+_NEGATIVE_MARKERS = {
+    "maybe",
+    "perhaps",
+    "uncertain",
+    "weak",
+    "could",
+    "might",
+    "guess",
+    "unsure",
+    "doubt",
+    "unclear",
+}
+_COMPLEXITY_MARKERS = {
+    "however",
+    "although",
+    "moreover",
+    "furthermore",
+    "nevertheless",
+    "consequently",
+    "subsequently",
+    "therefore",
+    "whereas",
+    "nonetheless",
+    "undoubtedly",
+    "ultimately",
+}
 
 
-class ModelNotTrainedError(Exception):
-    """Raised when a prediction is requested before any model is trained or loaded."""
-
-
-# ---------------------------------------------------------------------------
-# Task 7 - Feature extraction functions.
-# Each function is intentionally small, pure, and independently testable.
-# ---------------------------------------------------------------------------
-
-def extract_word_count(text: str) -> int:
-    """Number of whitespace-delimited tokens in the text."""
-    return len(text.split())
-
-
-def _split_sentences(text: str) -> List[str]:
-    """Split on ., !, ? (one or more) and drop empty fragments."""
-    fragments = re.split(r"[.!?]+", text)
-    return [s.strip() for s in fragments if s.strip()]
-
-
-def extract_sentence_count(text: str) -> int:
-    """
-    Count sentences via punctuation splitting. Text with no terminal
-    punctuation still counts as one sentence; empty text counts as zero.
-    """
-    if not text.strip():
-        return 0
-    return max(len(_split_sentences(text)), 1)
-
-
-def extract_average_sentence_length(text: str) -> float:
-    """Mean words per sentence: word_count / sentence_count."""
-    sentence_count = extract_sentence_count(text)
-    if sentence_count == 0:
+def _safe_divide(numerator: float, denominator: float) -> float:
+    if not denominator:
         return 0.0
-    return round(extract_word_count(text) / sentence_count, 3)
+    return numerator / denominator
 
 
-def _tokenize_words(text: str) -> List[str]:
-    """Lowercased alphanumeric word tokens with surrounding punctuation stripped."""
-    return re.findall(r"[a-zA-Z0-9']+", text.lower())
-
-
-def extract_unique_words(text: str) -> int:
-    """Count of distinct case-insensitive word tokens (vocabulary size)."""
-    return len(set(_tokenize_words(text)))
-
-
-def extract_lexical_diversity(text: str) -> float:
-    """
-    Type-token ratio: unique_words / word_count.
-    A higher ratio (closer to 1.0) means less word repetition / richer
-    vocabulary; a lower ratio means more repetitive phrasing.
-    """
-    words = _tokenize_words(text)
-    if not words:
-        return 0.0
-    return round(len(set(words)) / len(words), 3)
-
-
-def extract_question_count(text: str) -> int:
-    """Number of '?' characters, used as a proxy for rhetorical questioning."""
-    return text.count("?")
-
-
-def extract_average_word_length(text: str) -> float:
-    """Mean character length of word tokens (punctuation excluded)."""
-    words = _tokenize_words(text)
-    if not words:
-        return 0.0
-    return round(sum(len(w) for w in words) / len(words), 3)
-
-
-def extract_punctuation_density(text: str) -> float:
-    """
-    Ratio of punctuation characters to total characters. Higher density can
-    indicate more structured, emphatic, or clause-heavy phrasing.
-    """
-    if not text:
-        return 0.0
-    punctuation_chars = re.findall(r'[.,;:!?\-\'"()]', text)
-    return round(len(punctuation_chars) / len(text), 4)
+def _tokenize(text: str) -> List[str]:
+    return _WORD_RE.findall(text or "")
 
 
 def _count_syllables(word: str) -> int:
-    """
-    Heuristic syllable counter (no phonetic dictionary available offline):
-    counts vowel-group transitions, drops a trailing silent 'e', and floors
-    at one syllable per word. This is the standard approximation used when
-    computing Flesch-style readability without a CMUdict-style lookup.
-    """
-    word = word.lower()
-    vowels = "aeiouy"
-    syllables = 0
-    prev_was_vowel = False
-    for ch in word:
-        is_vowel = ch in vowels
-        if is_vowel and not prev_was_vowel:
-            syllables += 1
-        prev_was_vowel = is_vowel
-    if word.endswith("e") and syllables > 1:
-        syllables -= 1
-    return max(syllables, 1)
+    word = word.lower().strip()
+    if not word:
+        return 0
+    groups = 0
+    previous_was_vowel = False
+    for character in word:
+        is_vowel = character in _VOWELS
+        if is_vowel and not previous_was_vowel:
+            groups += 1
+        previous_was_vowel = is_vowel
+    if word.endswith("e") and groups > 1:
+        groups -= 1
+    return max(groups, 1)
 
 
-def extract_readability(text: str) -> float:
-    """
-    Approximate Flesch Reading Ease:
-        206.835 - 1.015 * (words / sentences) - 84.6 * (syllables / words)
-    Higher = easier to read. Clipped to [0, 100] since the raw formula can
-    exceed that range on very short or very dense inputs.
-    """
-    words = _tokenize_words(text)
-    sentence_count = extract_sentence_count(text)
-    if not words or sentence_count == 0:
+def _flesch_reading_ease(words: List[str], sentence_count: int) -> float:
+    if not words:
         return 0.0
-    syllable_count = sum(_count_syllables(w) for w in words)
-    score = 206.835 - 1.015 * (len(words) / sentence_count) - 84.6 * (syllable_count / len(words))
-    return round(max(0.0, min(100.0, score)), 2)
+    syllables = sum(_count_syllables(word) for word in words)
+    words_per_sentence = _safe_divide(len(words), max(sentence_count, 1))
+    syllables_per_word = _safe_divide(syllables, len(words))
+    return round(206.835 - 1.015 * words_per_sentence - 84.6 * syllables_per_word, 2)
 
 
-def extract_argument_length(text: str) -> int:
-    """Total character length of the raw argument text."""
-    return len(text)
+def _score_complexity(
+    *,
+    words: List[str],
+    sentence_count: int,
+    average_sentence_length: float,
+    average_word_length: float,
+    punctuation_density: float,
+) -> float:
+    complex_markers = sum(1 for word in words if word.lower() in _COMPLEXITY_MARKERS)
+    long_words = sum(1 for word in words if len(word) >= 8)
+    nested_clause_bonus = 1.2 if sentence_count >= 4 else 0.0
+    score = (
+        1.2
+        + 0.25 * average_sentence_length
+        + 0.35 * average_word_length
+        + 0.6 * complex_markers
+        + 0.15 * long_words
+        + 14.0 * punctuation_density
+        + nested_clause_bonus
+    )
+    return round(max(0.5, min(score, 24.0)), 3)
 
 
-def extract_complexity(text: str) -> float:
-    """
-    Composite linguistic-complexity heuristic:
-        0.4 * average_sentence_length + 1.5 * average_word_length + 5 * lexical_diversity
-    This is a deliberately simple, bounded, monotonic proxy for "how
-    sophisticated the argument reads" (longer sentences, longer words, and
-    richer vocabulary all push it up). It is NOT a validated readability
-    metric on its own -- extract_readability() covers that -- it exists
-    purely to give the regressor an aggregate complexity signal.
-    NOTE: data/generate_historical_debates.py mirrors this exact formula so
-    the synthetic training rows are internally consistent with live text.
-    """
-    avg_sentence_length = extract_average_sentence_length(text)
-    avg_word_length = extract_average_word_length(text)
-    diversity = extract_lexical_diversity(text)
-    score = 0.4 * avg_sentence_length + 1.5 * avg_word_length + 5 * diversity
-    return round(score, 3)
+def _score_persuasiveness(
+    words: List[str],
+    text: str,
+    average_sentence_length: float,
+    question_count: int,
+) -> float:
+    lower_words = [word.lower() for word in words]
+    positive_hits = sum(1 for word in lower_words if word in _POSITIVE_MARKERS)
+    negative_hits = sum(1 for word in lower_words if word in _NEGATIVE_MARKERS)
+    assertive_language = sum(1 for word in lower_words if word in {"must", "will", "should", "clearly", "evidence"})
+    emphasis_bonus = text.count("!") * 0.5 + question_count * 0.2
 
-
-# Heuristic markers associated with persuasive / rhetorical debate language.
-_PERSUASIVE_MARKERS = (
-    "must", "should", "clearly", "undoubtedly", "obviously", "in fact",
-    "the truth is", "everyone knows", "proven", "evidence shows", "imagine",
-    "we cannot ignore", "it is essential", "without question", "critically",
-    "simply put", "make no mistake",
-)
-
-
-def extract_persuasiveness(text: str) -> float:
-    """
-    Heuristic persuasiveness score (roughly 0-10): density of persuasive /
-    certainty language, exclamation marks, and rhetorical questions,
-    normalized by argument length so short and long arguments are
-    comparable. This is a lexical heuristic, not a semantic or fact-checked
-    measure of how convincing the argument actually is.
-    """
-    lowered = text.lower()
-    marker_hits = sum(lowered.count(marker) for marker in _PERSUASIVE_MARKERS)
-    exclamations = text.count("!")
-    questions = extract_question_count(text)
-    word_count = max(extract_word_count(text), 1)
-    raw_score = (marker_hits * 2 + exclamations + questions) / word_count * 100
-    return round(min(raw_score, 10.0), 3)
+    score = (
+        0.8
+        + 0.85 * positive_hits
+        + 0.35 * assertive_language
+        + 0.25 * max(average_sentence_length / 5.0, 0.0)
+        + emphasis_bonus
+        - 0.45 * negative_hits
+    )
+    return round(max(0.0, min(score, 10.0)), 3)
 
 
 def extract_features(text: str) -> Dict[str, float]:
-    """
-    Run the full feature battery over one piece of debate text and return a
-    flat dict keyed exactly by FEATURE_COLUMNS. This is the single function
-    both training-data generation and live prediction should reason about.
-    """
+    """Extract the training features used by the regression judge."""
+    cleaned_text = text or ""
+    words = _tokenize(cleaned_text)
+    word_count = len(words)
+    sentence_parts = [part.strip() for part in _SENTENCE_RE.findall(cleaned_text) if part.strip()]
+    sentence_count = max(len(sentence_parts), 1 if cleaned_text.strip() else 0)
+    unique_words = len({word.lower() for word in words})
+    lexical_diversity = round(_safe_divide(unique_words, word_count), 3)
+    average_sentence_length = round(_safe_divide(word_count, sentence_count), 3)
+    average_word_length = round(_safe_divide(sum(len(word) for word in words), word_count), 3)
+    question_count = cleaned_text.count("?")
+    punctuation_count = len(_PUNCTUATION_RE.findall(cleaned_text))
+    punctuation_density = round(_safe_divide(punctuation_count, max(len(cleaned_text), 1)), 4)
+    readability_estimate = _flesch_reading_ease(words, sentence_count or 1)
+    argument_length = len(cleaned_text)
+
+    complexity_score = _score_complexity(
+        words=words,
+        sentence_count=sentence_count,
+        average_sentence_length=average_sentence_length,
+        average_word_length=average_word_length,
+        punctuation_density=punctuation_density,
+    )
+    persuasiveness = _score_persuasiveness(words, cleaned_text, average_sentence_length, question_count)
+
     return {
-        "word_count": extract_word_count(text),
-        "sentence_count": extract_sentence_count(text),
-        "average_sentence_length": extract_average_sentence_length(text),
-        "unique_words": extract_unique_words(text),
-        "lexical_diversity": extract_lexical_diversity(text),
-        "question_count": extract_question_count(text),
-        "average_word_length": extract_average_word_length(text),
-        "punctuation_density": extract_punctuation_density(text),
-        "readability_estimate": extract_readability(text),
-        "argument_length": extract_argument_length(text),
-        "complexity_score": extract_complexity(text),
-        "persuasiveness": extract_persuasiveness(text),
+        "word_count": float(word_count),
+        "sentence_count": float(sentence_count),
+        "average_sentence_length": float(average_sentence_length),
+        "unique_words": float(unique_words),
+        "lexical_diversity": float(lexical_diversity),
+        "question_count": float(question_count),
+        "average_word_length": float(average_word_length),
+        "punctuation_density": float(punctuation_density),
+        "readability_estimate": float(readability_estimate),
+        "argument_length": float(argument_length),
+        "complexity_score": float(complexity_score),
+        "persuasiveness": float(persuasiveness),
     }
 
 
-# ---------------------------------------------------------------------------
-# Task 6 - Regression judge.
-# ---------------------------------------------------------------------------
+@dataclass
+class DebatePrediction:
+    score: float
+    features: Dict[str, float]
+
 
 class DebateRegressionJudge:
-    """
-    Scores debate arguments on a 1-10 scale using a RandomForestRegressor
-    trained on historical (synthetic) debate statistics, and turns a pair of
-    argument texts into a scored winner verdict for the Flask API layer.
-    """
+    """Train and apply a regression model over debate text features."""
 
-    def __init__(self, model_path: str = "models/debate_judge_model.pkl") -> None:
-        """
-        Args:
-            model_path: where the trained model is persisted with pickle.
-                If a model already exists at this path it is loaded eagerly
-                so the API can serve predictions without requiring a
-                training call on every process restart.
-        """
-        self.model_path = model_path
-        self.model: Optional[RandomForestRegressor] = None
-        self._try_load_existing_model()
+    def __init__(
+        self,
+        data_path: Optional[str] = None,
+        random_state: int = 42,
+    ) -> None:
+        self.data_path = data_path or os.path.join(_PROJECT_ROOT, "data", "historical_debates.csv")
+        self.random_state = random_state
+        self.model = RandomForestRegressor(
+            n_estimators=250,
+            random_state=self.random_state,
+            min_samples_leaf=2,
+        )
+        self.is_trained = False
+        self.metrics: Dict[str, Any] = {}
 
-    def _try_load_existing_model(self) -> None:
-        """Best-effort load of a previously-trained model from disk."""
-        if os.path.exists(self.model_path):
+        if os.path.exists(self.data_path):
             try:
-                with open(self.model_path, "rb") as f:
-                    self.model = pickle.load(f)
-                logger.info("Loaded existing regression model from %s", self.model_path)
-            except Exception as exc:  # noqa: BLE001 - defensive, we degrade gracefully
-                logger.warning("Could not load persisted model at %s (%s); will require retraining.",
-                                self.model_path, exc)
-                self.model = None
+                self.train_model(self.data_path)
+            except Exception:
+                self.is_trained = False
 
-    @staticmethod
-    def _resolve_dataset_path(dataset_path: str) -> str:
-        """
-        Accepts either 'data/historical_debates.csv' or a bare
-        'historical_debates.csv' and resolves whichever actually exists on
-        disk, since different callers may pass either convention.
-        """
-        candidates = [dataset_path]
-        if dataset_path == "data/historical_debates.csv":
-            candidates.append("historical_debates.csv")
-        elif dataset_path == "historical_debates.csv":
-            candidates.append("data/historical_debates.csv")
-        for candidate in candidates:
-            if os.path.exists(candidate):
-                return candidate
-        raise DatasetError(
-            f"Historical dataset not found. Tried: {candidates}. "
-            f"Run `python data/generate_historical_debates.py` first."
+    def train_model(self, dataset_path: Optional[str] = None) -> Dict[str, Any]:
+        """Train the regressor using the bundled historical debate CSV."""
+        path = dataset_path or self.data_path
+        if not os.path.isabs(path):
+            path = os.path.join(_PROJECT_ROOT, path)
+        if not os.path.exists(path):
+            raise FileNotFoundError(f"Training dataset not found: {path}")
+
+        frame = pd.read_csv(path)
+        missing = [column for column in FEATURE_COLUMNS + [TARGET_COLUMN] if column not in frame.columns]
+        if missing:
+            raise ValueError(f"Dataset is missing required columns: {', '.join(missing)}")
+        if len(frame) < 5:
+            raise ValueError("Training dataset must contain at least 5 rows.")
+
+        features = frame[FEATURE_COLUMNS]
+        target = frame[TARGET_COLUMN]
+        x_train, x_test, y_train, y_test = train_test_split(
+            features,
+            target,
+            test_size=0.2,
+            random_state=self.random_state,
         )
 
-    def train_model(self, dataset_path: str = "data/historical_debates.csv") -> Dict[str, object]:
-        """
-        Load the historical dataset, split 80/20, train a
-        RandomForestRegressor to predict human_score from FEATURE_COLUMNS,
-        persist the model to disk, and return training metrics.
+        self.model.fit(x_train, y_train)
+        predictions = self.model.predict(x_test)
 
-        Raises:
-            DatasetError: dataset missing, unreadable, or missing required columns.
-        """
-        resolved_path = self._resolve_dataset_path(dataset_path)
-
-        try:
-            df = pd.read_csv(resolved_path)
-        except Exception as exc:
-            raise DatasetError(f"Failed to read dataset at '{resolved_path}': {exc}") from exc
-
-        required_columns = FEATURE_COLUMNS + [TARGET_COLUMN]
-        missing_columns = [c for c in required_columns if c not in df.columns]
-        if missing_columns:
-            raise DatasetError(f"Dataset at '{resolved_path}' is missing required columns: {missing_columns}")
-
-        if len(df) < 10:
-            raise DatasetError(f"Dataset at '{resolved_path}' has only {len(df)} rows; need at least 10 to train.")
-
-        X = df[FEATURE_COLUMNS]
-        y = df[TARGET_COLUMN]
-
-        X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.2, random_state=42)
-
-        model = RandomForestRegressor(n_estimators=200, random_state=42, n_jobs=-1)
-        model.fit(X_train, y_train)
-
-        predictions = model.predict(X_test)
-        metrics: Dict[str, object] = {
-            "status": "success",
-            "mse": round(float(mean_squared_error(y_test, predictions)), 4),
-            "r2_score": round(float(r2_score(y_test, predictions)), 4),
-            "n_train_samples": int(len(X_train)),
-            "n_test_samples": int(len(X_test)),
-            "features_used": FEATURE_COLUMNS,
-            "dataset_path": resolved_path,
+        mse = mean_squared_error(y_test, predictions)
+        rmse = math.sqrt(mse)
+        metrics = {
+            "rows": int(len(frame)),
+            "train_rows": int(len(x_train)),
+            "test_rows": int(len(x_test)),
+            "mae": round(float(mean_absolute_error(y_test, predictions)), 4),
+            "mse": round(float(mse), 4),
+            "rmse": round(float(rmse), 4),
+            "r2": round(float(r2_score(y_test, predictions)), 4),
         }
-
-        model_dir = os.path.dirname(self.model_path)
-        if model_dir:
-            os.makedirs(model_dir, exist_ok=True)
-        with open(self.model_path, "wb") as f:
-            pickle.dump(model, f)
-
-        self.model = model
-        logger.info("Model trained on %s: mse=%s r2=%s", resolved_path, metrics["mse"], metrics["r2_score"])
+        self.is_trained = True
+        self.metrics = metrics
         return metrics
 
-    def predict_score(self, text: str) -> float:
-        """
-        Extract features from raw argument text and predict a score in
-        [1, 10] using the trained RandomForestRegressor.
-
-        Raises:
-            ModelNotTrainedError: no trained/loaded model is available.
-            ValueError: text is empty.
-        """
-        if not text or not text.strip():
-            raise ValueError("Cannot score empty argument text.")
-        if self.model is None:
-            self._try_load_existing_model()
-        if self.model is None:
-            raise ModelNotTrainedError(
-                "No trained regression model is available yet. "
-                "Call POST /api/machine-learning/train first."
-            )
+    def predict_score(self, text: str) -> DebatePrediction:
+        """Predict the human score for a single debate argument."""
+        if not self.is_trained:
+            self.train_model(self.data_path)
 
         features = extract_features(text)
-        feature_frame = pd.DataFrame([features])[FEATURE_COLUMNS]
-        raw_score = float(self.model.predict(feature_frame)[0])
-        clipped_score = max(1.0, min(10.0, raw_score))
-        return round(clipped_score, 2)
+        frame = pd.DataFrame([features], columns=FEATURE_COLUMNS)
+        raw_score = float(self.model.predict(frame)[0])
+        clamped_score = round(max(1.0, min(10.0, raw_score)), 2)
+        return DebatePrediction(score=clamped_score, features=features)
 
-    def evaluate_debate(self, advocate_text: str, challenger_text: str) -> Dict[str, object]:
-        """
-        Score both sides of a debate turn/transcript and pick a winner.
-        `advocate_text` corresponds to Agent A's argument(s); `challenger_text`
-        corresponds to Agent B's argument(s).
-        """
-        advocate_score = self.predict_score(advocate_text)
-        challenger_score = self.predict_score(challenger_text)
-        if advocate_score > challenger_score:
-            winner = "Advocate"
-        elif challenger_score > advocate_score:
-            winner = "Challenger"
+    def evaluate_debate(self, advocate_text: str, challenger_text: str) -> Dict[str, Any]:
+        """Score both sides and return a verdict payload."""
+        advocate = self.predict_score(advocate_text)
+        challenger = self.predict_score(challenger_text)
+
+        if advocate.score > challenger.score:
+            winner = "Agent A"
+        elif challenger.score > advocate.score:
+            winner = "Agent B"
         else:
             winner = "Tie"
+
         return {
-            "advocate_score": advocate_score,
-            "challenger_score": challenger_score,
+            "status": "evaluated",
             "winner": winner,
+            "advocate_score": advocate.score,
+            "challenger_score": challenger.score,
+            "margin": round(abs(advocate.score - challenger.score), 2),
+            "advocate_features": advocate.features,
+            "challenger_features": challenger.features,
+            "training_metrics": self.metrics,
         }
+
+
+__all__ = [
+    "DebatePrediction",
+    "DebateRegressionJudge",
+    "FEATURE_COLUMNS",
+    "TARGET_COLUMN",
+    "extract_features",
+]
