@@ -18,15 +18,19 @@ Defines DebateConductor, which:
 Configuration (all optional, all read from environment variables so no
 secrets or endpoints are hardcoded):
   LLM_PROVIDER          "ollama" (default) | "lmstudio" | "gpt4all"
-  LLM_MODEL             model name, e.g. "mistral", "llama3", "phi3", "gemma3"
-                         (default: "mistral")
+    LLM_MODEL             model name, e.g. "gemma2:2b", "llama3", "phi3", "gemma3"
+                                                 (default: "gemma2:2b")
   LLM_BASE_URL          override the provider's default endpoint
   LLM_REQUEST_TIMEOUT   seconds before a generation request times out (default: 60)
+    LLM_NUM_PREDICT       max new tokens for Ollama generation (default: 140)
+    LLM_TEMPERATURE       response creativity for Ollama generation (default: 0.7)
+    LLM_TOP_P             nucleus sampling for Ollama generation (default: 0.9)
 """
 from __future__ import annotations
 
 import logging
 import os
+import re
 import time
 from typing import Dict, List, Optional
 
@@ -51,6 +55,22 @@ _DEFAULT_BASE_URLS = {
     "gpt4all": "http://localhost:4891/v1/chat/completions",
 }
 
+_TRUNCATION_ENDINGS = {
+    "and",
+    "because",
+    "but",
+    "for",
+    "in",
+    "of",
+    "on",
+    "the",
+    "to",
+    "ultimately",
+    "therefore",
+    "however",
+    "this",
+}
+
 
 class DebateConductor:
     """
@@ -62,14 +82,16 @@ class DebateConductor:
     AGENT_A_SYSTEM_PROMPT = (
         "You are Agent A. You debate using logic, evidence, statistics and structured "
         "reasoning. Stay calm and precise, back claims with concrete reasoning, and "
-        "directly refute weak logic in your opponent's argument. Keep responses to "
-        "2-4 focused paragraphs."
+        "directly refute weak logic in your opponent's argument. Keep the response "
+        "between 60 and 120 words in 1 or 2 short paragraphs. Do not add headings, "
+        "bullets, or meta commentary. End with a complete sentence."
     )
     AGENT_B_SYSTEM_PROMPT = (
         "You are Agent B. You aggressively attack weak arguments while remaining "
         "respectful. Be persuasive and emotionally compelling, challenge the "
         "assumptions behind your opponent's reasoning, and look for logical flaws. "
-        "Keep responses to 2-4 focused paragraphs."
+        "Keep the response between 60 and 120 words in 1 or 2 short paragraphs. "
+        "Do not add headings, bullets, or meta commentary. End with a complete sentence."
     )
 
     def __init__(
@@ -84,20 +106,23 @@ class DebateConductor:
             provider: "ollama" | "lmstudio" | "gpt4all". Falls back to the
                 LLM_PROVIDER env var, then "ollama".
             model: model name understood by the provider. Falls back to
-                LLM_MODEL env var, then "mistral".
+                LLM_MODEL env var, then "gemma2:2b".
             base_url: full endpoint URL. Falls back to LLM_BASE_URL env var,
                 then the provider's documented default local port.
             request_timeout: seconds before giving up on a single generation
                 call. Falls back to LLM_REQUEST_TIMEOUT env var, then 60.
         """
         self.provider = (provider or os.environ.get("LLM_PROVIDER", "ollama")).lower()
-        self.model = model or os.environ.get("LLM_MODEL", "mistral")
+        self.model = model or os.environ.get("LLM_MODEL", "gemma2:2b")
         self.base_url = base_url or os.environ.get("LLM_BASE_URL") or _DEFAULT_BASE_URLS.get(
             self.provider, _DEFAULT_BASE_URLS["ollama"]
         )
         self.request_timeout = float(
             request_timeout or os.environ.get("LLM_REQUEST_TIMEOUT", 60)
         )
+        self.num_predict = int(os.environ.get("LLM_NUM_PREDICT", 140))
+        self.temperature = float(os.environ.get("LLM_TEMPERATURE", 0.7))
+        self.top_p = float(os.environ.get("LLM_TOP_P", 0.9))
 
         # Per-topic memory: topic -> ordered list of {"agent": "A"|"B", "response": str}.
         # Keyed by topic (rather than a single flat list) so multiple debate
@@ -105,8 +130,8 @@ class DebateConductor:
         self.debate_history: Dict[str, List[Dict[str, str]]] = {}
 
         logger.info(
-            "DebateConductor ready | provider=%s model=%s url=%s timeout=%ss",
-            self.provider, self.model, self.base_url, self.request_timeout,
+            "DebateConductor ready | provider=%s model=%s url=%s timeout=%ss num_predict=%s",
+            self.provider, self.model, self.base_url, self.request_timeout, self.num_predict,
         )
 
     # ------------------------------------------------------------------
@@ -278,7 +303,10 @@ class DebateConductor:
 
         if not text or not text.strip():
             raise LLMGenerationError("LLM returned an empty response.")
-        return text.strip()
+
+        text = text.strip()
+        text = self._ensure_response_length(system_prompt, user_prompt, text)
+        return text
 
     def _call_ollama(self, system_prompt: str, user_prompt: str) -> str:
         """POST to Ollama's /api/generate with stream disabled."""
@@ -287,6 +315,11 @@ class DebateConductor:
             "prompt": user_prompt,
             "system": system_prompt,
             "stream": False,
+            "options": {
+                "num_predict": self.num_predict,
+                "temperature": self.temperature,
+                "top_p": self.top_p,
+            },
         }
         resp = requests.post(self.base_url, json=payload, timeout=self.request_timeout)
         if resp.status_code != 200:
@@ -311,6 +344,9 @@ class DebateConductor:
                 {"role": "user", "content": user_prompt},
             ],
             "stream": False,
+            "temperature": self.temperature,
+            "top_p": self.top_p,
+            "max_tokens": self.num_predict,
         }
         resp = requests.post(self.base_url, json=payload, timeout=self.request_timeout)
         if resp.status_code != 200:
@@ -320,3 +356,72 @@ class DebateConductor:
             return data["choices"][0]["message"]["content"]
         except (ValueError, KeyError, IndexError) as exc:
             raise LLMGenerationError(f"Unexpected {self.provider} response shape: {exc}") from exc
+
+    def _ensure_response_length(self, system_prompt: str, user_prompt: str, text: str) -> str:
+        """Keep the answer in the requested word range with one corrective rewrite if needed."""
+        words = text.split()
+        has_terminal_punctuation = text.rstrip().endswith((".", "!", "?"))
+        sentences = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", text.strip()) if segment.strip()]
+        last_sentence = sentences[-1] if sentences else ""
+        last_words = last_sentence.split()
+        truncated_tail = bool(last_words) and (
+            len(last_words) <= 5 or last_words[-1].lower().strip(".,!?;:") in _TRUNCATION_ENDINGS
+        )
+
+        if truncated_tail and len(sentences) > 1:
+            trimmed_text = " ".join(sentences[:-1]).strip()
+            trimmed_words = trimmed_text.split()
+            if 60 <= len(trimmed_words) <= 120 and trimmed_text.endswith((".", "!", "?")):
+                return trimmed_text
+
+        if 60 <= len(words) <= 120 and has_terminal_punctuation and not truncated_tail:
+            return text
+
+        logger.info(
+            "Response length %d or sentence ending out of range; requesting a concise rewrite.",
+            len(words),
+        )
+        rewrite_prompt = (
+            f"{user_prompt}\n\n"
+            "Rewrite the answer to 60-120 words in 1 or 2 short paragraphs. "
+            "Preserve the same argument, keep it direct, and avoid headings or bullet points. "
+            "End with a complete sentence and avoid trailing fragments."
+        )
+
+        if self.provider == "ollama":
+            rewritten = self._call_ollama(system_prompt, rewrite_prompt)
+        else:
+            rewritten = self._call_openai_compatible(system_prompt, rewrite_prompt)
+
+        rewritten = rewritten.strip()
+        rewritten_words = rewritten.split()
+        rewritten_sentences = [segment.strip() for segment in re.split(r"(?<=[.!?])\s+", rewritten) if segment.strip()]
+        rewritten_last_sentence = rewritten_sentences[-1] if rewritten_sentences else ""
+        rewritten_last_words = rewritten_last_sentence.split()
+        rewritten_truncated_tail = bool(rewritten_last_words) and (
+            len(rewritten_last_words) <= 5 or rewritten_last_words[-1].lower().strip(".,!?;:") in _TRUNCATION_ENDINGS
+        )
+
+        if rewritten_truncated_tail and len(rewritten_sentences) > 1:
+            trimmed_rewritten = " ".join(rewritten_sentences[:-1]).strip()
+            trimmed_rewritten_words = trimmed_rewritten.split()
+            if 60 <= len(trimmed_rewritten_words) <= 120 and trimmed_rewritten.endswith((".", "!", "?")):
+                return trimmed_rewritten
+
+        if (
+            60 <= len(rewritten_words) <= 120
+            and rewritten.rstrip().endswith((".", "!", "?"))
+            and not rewritten_truncated_tail
+        ):
+            return rewritten
+
+        if len(rewritten_words) > 120:
+            clipped = " ".join(rewritten_words[:120]).rstrip(" ,;:")
+            return clipped + "." if not clipped.endswith((".", "!", "?")) else clipped
+
+        if not rewritten.endswith((".", "!", "?")):
+            return rewritten + "."
+
+        raise LLMGenerationError(
+            f"LLM response remained too short after rewrite ({len(rewritten_words)} words)."
+        )
