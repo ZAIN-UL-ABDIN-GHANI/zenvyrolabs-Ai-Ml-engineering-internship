@@ -83,14 +83,14 @@ class DebateConductor:
         "You are Agent A. You debate using logic, evidence, statistics and structured "
         "reasoning. Stay calm and precise, back claims with concrete reasoning, and "
         "directly refute weak logic in your opponent's argument. Keep the response "
-        "between 60 and 120 words in 1 or 2 short paragraphs. Do not add headings, "
+        "between 60 and 80 words . Do not add headings, "
         "bullets, or meta commentary. End with a complete sentence."
     )
     AGENT_B_SYSTEM_PROMPT = (
         "You are Agent B. You aggressively attack weak arguments while remaining "
         "respectful. Be persuasive and emotionally compelling, challenge the "
         "assumptions behind your opponent's reasoning, and look for logical flaws. "
-        "Keep the response between 60 and 120 words in 1 or 2 short paragraphs. "
+        "Keep the response between 60 and 70 words in 1  short paragraphs. "
         "Do not add headings, bullets, or meta commentary. End with a complete sentence."
     )
 
