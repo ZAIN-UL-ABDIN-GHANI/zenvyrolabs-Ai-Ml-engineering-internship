@@ -12,6 +12,38 @@ app = Flask(__name__)
 if CORS is not None:
     CORS(app)
 
+
+ALLOWED_ORIGINS = {
+    "http://localhost:8080",
+    "http://127.0.0.1:8080",
+}
+
+
+@app.before_request
+def handle_api_preflight():
+    """Return a lightweight response for API preflight requests."""
+    if request.method == "OPTIONS" and request.path.startswith("/api/"):
+        return ("", 204)
+
+
+@app.after_request
+def add_cors_headers(response):
+    """Attach CORS headers to API responses so browser fetches can succeed."""
+    origin = request.headers.get("Origin")
+
+    if request.path.startswith("/api/"):
+        if origin in ALLOWED_ORIGINS:
+            response.headers["Access-Control-Allow-Origin"] = origin
+            response.headers["Vary"] = "Origin"
+        else:
+            response.headers["Access-Control-Allow-Origin"] = "*"
+
+        response.headers["Access-Control-Allow-Methods"] = "GET, POST, OPTIONS"
+        response.headers["Access-Control-Allow-Headers"] = "Content-Type, Authorization, X-Requested-With"
+        response.headers["Access-Control-Max-Age"] = "86400"
+
+    return response
+
 # Initialize Services
 conductor = DebateConductor()
 ml_judge = DebateRegressionJudge()
