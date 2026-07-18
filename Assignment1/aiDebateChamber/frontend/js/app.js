@@ -105,6 +105,10 @@ function resetJudgeOverlay() {
 }
 
 function buildReasoning(result) {
+    if (result.reasoning && typeof result.reasoning === 'string') {
+        return result.reasoning;
+    }
+
     const winner = result.winner;
     const margin = Number(result.margin || 0).toFixed(2);
     const advocateScore = Number(result.advocate_score || 0).toFixed(2);
@@ -122,7 +126,9 @@ function showJudgeResult(result) {
     const advocateScore = Number(result.advocate_score || 0);
     const challengerScore = Number(result.challenger_score || 0);
     const maxScore = Math.max(advocateScore, challengerScore, 10);
-    const confidence = Math.max(50, Math.min(99, Math.round(50 + (Number(result.margin || 0) * 5))));
+    const confidence = Number.isFinite(Number(result.confidence))
+        ? Number(result.confidence)
+        : Math.max(50, Math.min(99, Math.round(50 + (Number(result.margin || 0) * 5))));
     const advocatePercent = Math.round((advocateScore / maxScore) * 100);
     const challengerPercent = Math.round((challengerScore / maxScore) * 100);
 
@@ -159,6 +165,16 @@ async function finalizeDebate() {
     statusText.textContent = 'Running ML Judge evaluation...';
 
     try {
+        const trainResponse = await fetch('http://127.0.0.1:5000/api/machine-learning/train', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' }
+        });
+
+        if (!trainResponse.ok) {
+            const errorBody = await trainResponse.json().catch(() => ({}));
+            throw new Error(errorBody.error || `Training failed with HTTP ${trainResponse.status}`);
+        }
+
         const advocateText = debateTranscript.filter(turn => turn.agent === 'A').map(turn => turn.response).join(' ');
         const challengerText = debateTranscript.filter(turn => turn.agent === 'B').map(turn => turn.response).join(' ');
 
@@ -202,6 +218,7 @@ function setProcessingState(isLoading) {
         networkStatus.style.color = "#eab308";
         networkStatus.style.borderColor = "rgba(234,179,8,0.3)";
     } else {
+        topicInput.disabled = false;
         networkStatus.textContent = "IDLE";
         networkStatus.style.color = "#8b5cf6";
         networkStatus.style.borderColor = "rgba(139,92,246,0.3)";
@@ -213,8 +230,6 @@ startBtn.addEventListener('click', async () => {
     if (!topic) return alert("Please enter a custom topic first.");
     
     currentTopic = topic;
-    lastSpeaker = null;
-    lastMessage = "";
     debateTranscript = [];
     debateConcluded = false;
     displayTopic.textContent = `"${topic}"`;
@@ -245,12 +260,11 @@ startBtn.addEventListener('click', async () => {
 
         lastSpeaker = data.agent || "A";
         lastMessage = data.message;
+        recordTurn(lastSpeaker, lastMessage);
 
         if (!lastMessage) {
             throw new Error("Backend returned an empty opening response.");
         }
-
-        recordTurn(lastSpeaker, lastMessage);
         
         appendMessage(lastSpeaker, lastMessage, currentRound);
         
@@ -299,12 +313,11 @@ nextBtn.addEventListener('click', async () => {
 
         lastSpeaker = data.agent || nextAgent;
         lastMessage = data.message;
+        recordTurn(lastSpeaker, lastMessage);
 
         if (!lastMessage) {
             throw new Error("Backend returned an empty response.");
         }
-
-        recordTurn(lastSpeaker, lastMessage);
         
         appendMessage(lastSpeaker, lastMessage, currentRound);
         
