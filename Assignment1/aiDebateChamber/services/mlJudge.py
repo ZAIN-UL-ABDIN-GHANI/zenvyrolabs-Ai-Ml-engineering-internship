@@ -16,6 +16,7 @@ from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
 
 import pandas as pd
+import numpy as np
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
@@ -217,6 +218,8 @@ def extract_features(text: str) -> Dict[str, float]:
 class DebatePrediction:
     score: float
     features: Dict[str, float]
+    raw_score: float
+    tree_std: float
 
 
 class DebateRegressionJudge:
@@ -236,6 +239,11 @@ class DebateRegressionJudge:
         )
         self.is_trained = False
         self.metrics: Dict[str, Any] = {}
+        self.feature_means: Dict[str, float] = {}
+        self.feature_stds: Dict[str, float] = {}
+        self.feature_importances: Dict[str, float] = {}
+        self.target_mean: float = 0.0
+        self.target_std: float = 1.0
 
         if os.path.exists(self.data_path):
             try:
@@ -281,20 +289,148 @@ class DebateRegressionJudge:
             "rmse": round(float(rmse), 4),
             "r2": round(float(r2_score(y_test, predictions)), 4),
         }
+        self.feature_means = {column: float(frame[column].mean()) for column in FEATURE_COLUMNS}
+        self.feature_stds = {
+            column: float(frame[column].std(ddof=0) or 1.0)
+            for column in FEATURE_COLUMNS
+        }
+        self.feature_importances = {
+            column: float(importance)
+            for column, importance in zip(FEATURE_COLUMNS, self.model.feature_importances_)
+        }
+        self.target_mean = float(target.mean())
+        self.target_std = float(target.std(ddof=0) or 1.0)
         self.is_trained = True
         self.metrics = metrics
         return metrics
 
-    def predict_score(self, text: str) -> DebatePrediction:
-        """Predict the human score for a single debate argument."""
+    def _predict_with_details(self, text: str) -> DebatePrediction:
         if not self.is_trained:
             self.train_model(self.data_path)
 
         features = extract_features(text)
         frame = pd.DataFrame([features], columns=FEATURE_COLUMNS)
-        raw_score = float(self.model.predict(frame)[0])
+        tree_predictions = np.array([estimator.predict(frame)[0] for estimator in self.model.estimators_], dtype=float)
+        raw_score = float(tree_predictions.mean())
+        tree_std = float(tree_predictions.std(ddof=0)) if len(tree_predictions) > 1 else 0.0
         clamped_score = round(max(1.0, min(10.0, raw_score)), 2)
-        return DebatePrediction(score=clamped_score, features=features)
+        return DebatePrediction(
+            score=clamped_score,
+            features=features,
+            raw_score=raw_score,
+            tree_std=tree_std,
+        )
+
+    def predict_score(self, text: str) -> DebatePrediction:
+        """Predict the human score for a single debate argument."""
+        return self._predict_with_details(text)
+
+    def _feature_separation(self, advocate: DebatePrediction, challenger: DebatePrediction) -> float:
+        """Return a deterministic 0-1 signal for how far apart the arguments are on the trained features."""
+        weighted_gap = 0.0
+        weight_total = 0.0
+
+        for feature in FEATURE_COLUMNS:
+            importance = self.feature_importances.get(feature, 0.0)
+            if importance <= 0.0:
+                continue
+
+            scale = self.feature_stds.get(feature, 1.0) or 1.0
+            normalized_delta = abs(advocate.features.get(feature, 0.0) - challenger.features.get(feature, 0.0)) / scale
+
+            # Large feature differences should matter, but only up to a point.
+            bounded_delta = min(normalized_delta / 2.5, 1.0)
+            weighted_gap += importance * bounded_delta
+            weight_total += importance
+
+        if not weight_total:
+            return 0.0
+
+        return max(0.0, min(weighted_gap / weight_total, 1.0))
+
+    def _score_confidence(self, advocate: DebatePrediction, challenger: DebatePrediction) -> float:
+        """Derive a deterministic confidence score from margin, features, and model stability."""
+        score_margin = abs(advocate.score - challenger.score)
+        raw_margin = abs(advocate.raw_score - challenger.raw_score)
+        average_uncertainty = (advocate.tree_std + challenger.tree_std) / 2.0
+        model_quality = float(self.metrics.get("r2", 0.0))
+        normalized_quality = max(0.0, min(1.0, (model_quality + 0.25) / 1.25))
+        feature_separation = self._feature_separation(advocate, challenger)
+        stability = 1.0 / (1.0 + average_uncertainty)
+
+        blended_margin = (0.7 * score_margin) + (0.3 * raw_margin)
+        band_adjustment = (4.0 * feature_separation) + (2.0 * normalized_quality) + (2.0 * stability)
+
+        if blended_margin < 0.35:
+            confidence = 52.0 + (blended_margin / 0.35) * 6.0 + band_adjustment
+            return round(max(50.0, min(60.0, confidence)), 2)
+
+        if blended_margin < 0.9:
+            confidence = 60.0 + ((blended_margin - 0.35) / 0.55) * 13.0 + band_adjustment
+            return round(max(60.0, min(75.0, confidence)), 2)
+
+        confidence = 75.0 + min((blended_margin - 0.9) * 6.5, 18.0) + band_adjustment
+        return round(max(75.0, min(95.0, confidence)), 2)
+
+    def _build_reasoning(
+        self,
+        advocate: DebatePrediction,
+        challenger: DebatePrediction,
+        winner: str,
+    ) -> str:
+        """Explain the verdict using the most important feature differences."""
+        delta_rows = []
+        for feature in FEATURE_COLUMNS:
+            scale = self.feature_stds.get(feature, 1.0) or 1.0
+            importance = self.feature_importances.get(feature, 0.0)
+            delta = (advocate.features.get(feature, 0.0) - challenger.features.get(feature, 0.0)) / scale
+            delta_rows.append((feature, delta * importance, delta))
+
+        delta_rows.sort(key=lambda item: abs(item[1]), reverse=True)
+        top_rows = delta_rows[:3]
+
+        def describe_feature(feature_name: str) -> str:
+            mapping = {
+                "word_count": "word count",
+                "sentence_count": "sentence count",
+                "average_sentence_length": "average sentence length",
+                "unique_words": "unique word usage",
+                "lexical_diversity": "lexical diversity",
+                "question_count": "rhetorical questioning",
+                "average_word_length": "average word length",
+                "punctuation_density": "punctuation density",
+                "readability_estimate": "readability",
+                "argument_length": "argument length",
+                "complexity_score": "complexity",
+                "persuasiveness": "persuasiveness",
+            }
+            return mapping.get(feature_name, feature_name)
+
+        if winner == "Tie":
+            return (
+                "The regression model found the arguments effectively balanced. "
+                f"Agent A scored {advocate.score:.2f} and Agent B scored {challenger.score:.2f}, "
+                "with no decisive feature advantage large enough to separate them."
+            )
+
+        feature_phrases = []
+        for feature_name, weighted_delta, raw_delta in top_rows:
+            if abs(weighted_delta) < 1e-9:
+                continue
+            direction = "favored Agent A" if raw_delta > 0 else "favored Agent B"
+            feature_phrases.append(
+                f"{describe_feature(feature_name)} {direction}"
+            )
+
+        if not feature_phrases:
+            feature_phrases.append("the trained regression features were nearly identical")
+
+        joined_features = "; ".join(feature_phrases)
+        return (
+            f"{winner} won because the trained RandomForestRegressor assigned a higher score "
+            f"({advocate.score:.2f} vs {challenger.score:.2f}) and the strongest feature signals were {joined_features}. "
+            "The verdict is deterministic, derived from the fitted debate features, and supported by the model's training metrics."
+        )
 
     def evaluate_debate(self, advocate_text: str, challenger_text: str) -> Dict[str, Any]:
         """Score both sides and return a verdict payload."""
@@ -308,14 +444,23 @@ class DebateRegressionJudge:
         else:
             winner = "Tie"
 
+        confidence = self._score_confidence(advocate, challenger)
+        reasoning = self._build_reasoning(advocate, challenger, winner)
+
         return {
             "status": "evaluated",
             "winner": winner,
             "advocate_score": advocate.score,
             "challenger_score": challenger.score,
             "margin": round(abs(advocate.score - challenger.score), 2),
+            "confidence": confidence,
+            "reasoning": reasoning,
             "advocate_features": advocate.features,
             "challenger_features": challenger.features,
+            "advocate_prediction_std": round(advocate.tree_std, 4),
+            "challenger_prediction_std": round(challenger.tree_std, 4),
+            "advocate_raw_score": round(advocate.raw_score, 4),
+            "challenger_raw_score": round(challenger.raw_score, 4),
             "training_metrics": self.metrics,
         }
 
