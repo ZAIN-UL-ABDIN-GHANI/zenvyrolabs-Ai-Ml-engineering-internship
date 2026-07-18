@@ -74,15 +74,54 @@
         </div>
     </footer>
 
-    <!-- Judge Modal (Static Placeholder for Backend) -->
+    <!-- Judge Overlay -->
     <div class="judge-overlay" id="judgeOverlay">
         <div class="judge-card">
             <div class="judge-header">
                 <div class="judge-icon">⚖️</div>
-                <h2>Machine Learning API Evaluating...</h2>
-                <p>Waiting for mlJudge.py Scikit-Learn evaluation</p>
+                <h2 id="judgeTitle">Machine Learning Verdict</h2>
+                <p id="judgeSubtitle">Waiting for the regression judge to score the final debate</p>
             </div>
-            <button class="btn-reset" onclick="location.reload()" style="margin-top: 20px;">Reset API Connection</button>
+
+            <div class="judge-scores">
+                <div class="score-card advocate-score-card">
+                    <p>Agent A Score</p>
+                    <div class="score-num" id="advocateScoreLabel">--</div>
+                    <div class="score-bar"><div class="score-fill advocate-fill" id="advocateFill"></div></div>
+                </div>
+                <div class="vs-badge">VS</div>
+                <div class="score-card challenger-score-card">
+                    <p>Agent B Score</p>
+                    <div class="score-num" id="challengerScoreLabel">--</div>
+                    <div class="score-bar"><div class="score-fill challenger-fill" id="challengerFill"></div></div>
+                </div>
+            </div>
+
+            <div class="verdict-box">
+                <strong id="verdictLabel">Pending</strong> · <span id="winnerLabel">Waiting</span> · Confidence <span id="confidenceLabel">0%</span>
+                <div id="reasoningLabel" style="margin-top:10px;">No final verdict has been calculated yet.</div>
+            </div>
+
+            <div class="judge-metrics" id="judgeMetrics">
+                <div class="metric">
+                    <div class="label">Training Data</div>
+                    <div class="val" id="judgeMetricTraining">--</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Margin</div>
+                    <div class="val" id="judgeMetricMargin">--</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Advantage</div>
+                    <div class="val" id="judgeMetricAdvantage">--</div>
+                </div>
+                <div class="metric">
+                    <div class="label">Complexity Snapshot</div>
+                    <div class="val" id="judgeMetricComplexity">--</div>
+                </div>
+            </div>
+
+            <button class="btn-reset" id="resetBtn">Reset API Connection</button>
         </div>
     </div>
 
