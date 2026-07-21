@@ -80,7 +80,7 @@ Every completed assignment represents another milestone in my professional growt
 | Week | Assignment                   | Category                   | Status         |
 | ---- | ---------------------------- | -------------------------- | -------------- |
 | 01   | Autonomous AI Debate Chamber | Multi-Agent AI             | ✅ Completed    |
-| 02   | Coming Soon                  | AI Engineering Challenge   | 🚧 In Progress |
+| 02 | **AI Voice Conversion Platform (RVC)** | Full-Stack MLOps & AI Engineering | ✅ **Completed** |
 | 03   | Coming Soon                  | Machine Learning Challenge | ⏳ Pending      |
 | 04   | Coming Soon                  | Final Technical Challenge  | ⏳ Pending      |
 
