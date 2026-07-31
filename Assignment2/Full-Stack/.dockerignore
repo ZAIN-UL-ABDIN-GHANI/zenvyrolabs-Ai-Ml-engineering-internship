@@ -1,0 +1,20 @@
+venv/
+rvc_venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+temp/
+logs/
+hf_cache/
+.git/
+.gitignore
+*.egg-info/
+.DS_Store
+
+# Developer-machine caches that should never ship (Stage 1 Analysis, §5.6/§8.4)
+rvc_models/.cache/
+
+# Local state that belongs in a mounted volume, not baked into the image
+saved_voices/*
+!saved_voices/.gitkeep
+training_data/
