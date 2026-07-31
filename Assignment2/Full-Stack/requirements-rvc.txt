@@ -1,0 +1,12 @@
+# Dependencies for the ISOLATED RVC runtime (rvc_venv), kept separate from
+# requirements.txt so RVC's dependency pins never conflict with the main
+# venv's F5-TTS/transformers stack (SDS Decision D-3).
+#
+# This file did not exist anywhere in the delivered project (Stage 1
+# Analysis, F-13). rvc-python's exact required version should be verified
+# against the fork/release actually intended for rvc_infer.py before
+# building this image — see the Stage 1 Analysis, F-02, for the specific
+# API mismatch to check for (VoiceClone/.infer vs RVCInference/.infer_file).
+rvc-python
+faiss-cpu
+soundfile
