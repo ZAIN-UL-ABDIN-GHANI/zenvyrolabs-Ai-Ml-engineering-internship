@@ -1,0 +1,10 @@
+gradio
+tomli_w
+pydub
+noisereduce
+f5-tts
+edge-tts
+transformers
+soundfile
+resemblyzer
+setuptools<81
