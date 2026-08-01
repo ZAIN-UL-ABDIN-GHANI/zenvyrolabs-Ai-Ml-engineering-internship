@@ -14,6 +14,11 @@ import subprocess
 import shutil
 from pydub import AudioSegment
 
+import dll_fix
+
+import torch
+import torchcodec
+
 # --- New enterprise backend (additive; does not replace anything above) ---
 import pathlib
 from voice_studio.config import get_settings
@@ -37,15 +42,38 @@ os.makedirs(RVC_MODELS_DIR, exist_ok=True)
 
 # ─── Utility: Run edge-tts via subprocess (avoids asyncio conflicts with Gradio) ───
 def run_edge_tts(text, voice, output_path, rate=None, pitch=None):
-    """Generate TTS audio using edge-tts CLI. Returns True on success."""
-    cmd = [EDGE_TTS_EXE, "--voice", voice, "--text", text, "--write-media", output_path]
-    if rate:
-        cmd += ["--rate", rate]
-    if pitch:
-        cmd += ["--pitch", pitch]
-    result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8')
-    return result.returncode == 0, result.stderr
+    cmd = [
+        EDGE_TTS_EXE,
+        "--voice", voice,
+        "--text", text,
+        "--write-media", output_path,
+    ]
 
+    if rate is not None and str(rate).strip():
+        cmd.extend(["--rate", str(rate)])
+
+    if pitch is not None and str(pitch).strip():
+        cmd.extend(["--pitch", str(pitch)])
+
+
+
+    print("\nCOMMAND:")
+    print(cmd)
+
+    result = subprocess.run(
+        cmd,
+        capture_output=True,
+        text=True,
+        encoding="utf-8"
+    )
+
+    print("\nSTDOUT:")
+    print(result.stdout)
+
+    print("\nSTDERR:")
+    print(result.stderr)
+
+    return result.returncode == 0, result.stderr
 # ─── Voice Library ───
 def get_saved_voices():
     voices = []
