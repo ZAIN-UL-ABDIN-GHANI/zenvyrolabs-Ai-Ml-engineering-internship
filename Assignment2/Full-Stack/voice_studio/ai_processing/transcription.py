@@ -19,16 +19,17 @@ class SpeechRecognizer(Protocol):
     def __call__(self, audio_path: str, chunk_length_s: int, generate_kwargs: dict) -> dict: ...
 
 
-def _load_default_whisper_pipeline() -> SpeechRecognizer:
-    import torch
-    from transformers import pipeline
+def _load_default_whisper_pipeline():
+    import whisper
 
-    device = "cuda:0" if torch.cuda.is_available() else "cpu"
-    dtype = torch.float16 if torch.cuda.is_available() else torch.float32
-    return pipeline(
-        "automatic-speech-recognition", model="openai/whisper-base", device=device, torch_dtype=dtype
-    )
+    model = whisper.load_model("base")
 
+    class WhisperRecognizer:
+        def __call__(self, audio_path: str, chunk_length_s: int = 30, generate_kwargs: dict | None = None):
+            result = model.transcribe(audio_path)
+            return {"text": result["text"]}
+
+    return WhisperRecognizer()
 
 @dataclass(frozen=True, slots=True)
 class TranscriptionRequest:
