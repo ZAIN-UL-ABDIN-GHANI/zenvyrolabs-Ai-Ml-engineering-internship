@@ -34,3 +34,10 @@ env/
 # OS files
 .DS_Store
 Thumbs.db
+hf_cache/
+rvc_venv/
+temp/
+*.wav
+*.mp3
+__pycache__/
+.coverage
