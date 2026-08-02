@@ -37,6 +37,24 @@ class PathSettings:
     f5_tts_executable: Path
     rvc_python_executable: Path
 
+    @classmethod
+    def from_root(cls, root: Path | None = None) -> "PathSettings":
+        resolved_root = (root or _project_root()).resolve()
+        primary_venv = resolved_root / "venv"
+        rvc_venv = resolved_root / "rvc_venv"
+
+        return cls(
+            root=resolved_root,
+            temp_dir=resolved_root / "temp",
+            saved_voices_dir=resolved_root / "saved_voices",
+            rvc_models_dir=resolved_root / "rvc_models",
+            training_data_dir=resolved_root / "training_data",
+            hf_cache_dir=resolved_root / "hf_cache",
+            edge_tts_executable=_venv_executable(primary_venv, "edge-tts"),
+            f5_tts_executable=_venv_executable(primary_venv, "f5-tts_infer-cli"),
+            rvc_python_executable=_venv_executable(rvc_venv, "python"),
+        )
+        
 @classmethod
 def from_root(cls, root: Path | None = None) -> PathSettings:
     resolved_root = (root or _project_root()).resolve()
