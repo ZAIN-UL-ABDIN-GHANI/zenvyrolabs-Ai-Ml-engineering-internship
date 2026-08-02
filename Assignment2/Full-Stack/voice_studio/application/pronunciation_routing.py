@@ -11,7 +11,13 @@ from voice_studio.ai_processing import (
     VoiceGenerationEngine,
     VoiceGenerationRequest,
 )
-from voice_studio.domain import Language, ModelArtifact, PronunciationPolicy, RoutingDecision, VoiceProfile
+from voice_studio.domain import (
+    Language,
+    ModelArtifact,
+    PronunciationPolicy,
+    RoutingDecision,
+    VoiceProfile,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -24,12 +30,9 @@ class LineVoicingRequest:
 
 
 class PronunciationRoutingService:
-    """Application Layer service implementing SDS §6.4 / §12.
-
-    Every line is routed through PronunciationPolicy: text identified as
-    Hindi/Urdu is transliterated (if romanized) and native-narrated
-    before conversion into the target voice; everything else is cloned
-    directly. Closes the Stage 1 Analysis's F-09 gap.
+    """
+    Routes every line either through direct voice cloning or
+    native-language narration + RVC conversion.
     """
 
     def __init__(
@@ -48,8 +51,10 @@ class PronunciationRoutingService:
 
     def voice_line(self, request: LineVoicingRequest) -> Path:
         evaluation = self._policy.evaluate(request.text)
+
         if evaluation.decision is RoutingDecision.DIRECT_CLONE:
             return self._direct_clone(request)
+
         return self._hybrid_native_then_convert(request, evaluation.language)
 
     def _direct_clone(self, request: LineVoicingRequest) -> Path:
@@ -62,22 +67,41 @@ class PronunciationRoutingService:
             )
         )
 
-    def _hybrid_native_then_convert(self, request: LineVoicingRequest, language: Language) -> Path:
+    def _hybrid_native_then_convert(
+        self,
+        request: LineVoicingRequest,
+        language: Language,
+    ) -> Path:
+        """
+        If no RVC model exists, simply use F5-TTS voice cloning.
+        Otherwise use:
+            EdgeTTS -> RVC -> Final Voice
+        """
+
+        # Fallback when no RVC model is available
         if request.conversion_model is None:
-            raise ValueError(
-                f"Line {request.line_index}: native-language routing requires a "
-                "voice conversion model, but none was provided."
-            )
+            return self._direct_clone(request)
 
         narration_text = self._localize_text(request.text, language)
-        narrated_path = request.output_dir / f"line_{request.line_index:04d}_narrated.wav"
+
+        narrated_path = (
+            request.output_dir
+            / f"line_{request.line_index:04d}_narrated.wav"
+        )
+
         self._neural_narration.narrate(
             NarrationRequest(
-                text=narration_text, output_path=narrated_path, voice=self._narration_voice
+                text=narration_text,
+                output_path=narrated_path,
+                voice=self._narration_voice,
             )
         )
 
-        converted_path = request.output_dir / f"line_{request.line_index:04d}_converted.wav"
+        converted_path = (
+            request.output_dir
+            / f"line_{request.line_index:04d}_converted.wav"
+        )
+
         return self._voice_conversion.convert(
             ConversionRequest(
                 input_audio_path=narrated_path,
@@ -90,6 +114,7 @@ class PronunciationRoutingService:
     def _localize_text(text: str, language: Language) -> str:
         if language is not Language.ROMANIZED_HINDI_URDU:
             return text
+
         from transliterate import roman_to_devanagari
 
         return roman_to_devanagari(text)
