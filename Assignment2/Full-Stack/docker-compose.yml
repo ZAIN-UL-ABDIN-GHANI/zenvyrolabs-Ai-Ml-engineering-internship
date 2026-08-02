@@ -13,10 +13,13 @@ services:
       - training_data:/app/training_data     # Training Store (SDS §14)
       - logs:/app/logs                       # Logging output (SDS §16)
       - hf_cache:/app/hf_cache               # Engine model/download cache
-    environment:
-      VOICE_STUDIO_F5TTS_MODEL: "F5TTS_Base"
-      VOICE_STUDIO_NARRATION_VOICE: "en-US-GuyNeural"
-      VOICE_STUDIO_AUTO_ROUTE_PRONUNCIATION: "true"
+environment:
+  HF_TOKEN: ${HF_TOKEN}
+  HF_HOME: ${HF_HOME}
+  MPLBACKEND: ${MPLBACKEND}
+  VOICE_STUDIO_F5TTS_MODEL: ${VOICE_STUDIO_F5TTS_MODEL}
+  VOICE_STUDIO_NARRATION_VOICE: ${VOICE_STUDIO_NARRATION_VOICE}
+  VOICE_STUDIO_AUTO_ROUTE_PRONUNCIATION: ${VOICE_STUDIO_AUTO_ROUTE_PRONUNCIATION}
     deploy:
       resources:
         reservations:

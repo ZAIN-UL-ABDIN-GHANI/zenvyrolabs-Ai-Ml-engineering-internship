@@ -1,3 +1,6 @@
+
+
+
 # Dependencies
 node_modules/
 
@@ -34,10 +37,23 @@ env/
 # OS files
 .DS_Store
 Thumbs.db
+
+# Cache
 hf_cache/
-rvc_venv/
+
+# Local temp files
 temp/
+
+# RVC virtual environment
+rvc_venv/
+
+# Keep voice files required for F5-TTS
+!saved_voices/**/*.wav
+!saved_voices/**/*.mp3
+
+# Ignore other audio files outside saved_voices
 *.wav
 *.mp3
-__pycache__/
+
+# Coverage
 .coverage
