@@ -1,10 +1,10 @@
 model = "F5TTS_Base"
 ref_audio = "U:\\zenvyrolabsinternship\\Assignment2\\Full-Stack\\temp\\trimmed_ref_gen.wav"
-ref_text = "Hello everyone. Welcome to my voice cloning demo. Today we are testing the AI voice model."
+ref_text = "heloo"
 speed = 1.0
 nfe_step = 16
-gen_text = "Thank you ARIA. I am excited to demonstrate our system today."
+gen_text = "heloo"
 output_dir = "U:\\zenvyrolabsinternship\\Assignment2\\Full-Stack"
-output_file = "podcast_line_1.wav"
+output_file = "output_cloned.wav"
 
 [voices]
