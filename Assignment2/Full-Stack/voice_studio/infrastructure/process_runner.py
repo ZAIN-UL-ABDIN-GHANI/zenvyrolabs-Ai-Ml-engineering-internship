@@ -25,15 +25,10 @@ class ProcessResult:
 
 
 class ProcessRunner:
-    """Executes external engine executables as isolated subprocesses (SDS §5.5).
+    """Runs external executables safely."""
 
-    Every invocation passes arguments as a discrete list, never through a
-    shell, preserving the injection-safe pattern already verified sound
-    in the Stage 1 Analysis (F-28). Missing executables fail fast with a
-    clear message instead of surfacing as a cryptic downstream error.
-    """
-
-    def __init__(self, timeout_seconds: float | None = None) -> None:
+    def __init__(self, timeout_seconds: float | None = 9600) -> None:
+        # Default timeout: 1 hour
         self._timeout_seconds = timeout_seconds
 
     def run(
@@ -42,23 +37,40 @@ class ProcessRunner:
         arguments: list[str],
         cwd: Path | None = None,
     ) -> ProcessResult:
+
         if not executable.exists():
             raise FileNotFoundError(
-                f"Required executable not found: {executable}. "
-                "Verify installation and VOICE_STUDIO_ROOT configuration."
+                f"Required executable not found: {executable}"
             )
+
         command = [str(executable), *arguments]
-        completed = subprocess.run(
-            command,
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            cwd=str(cwd) if cwd else None,
-            timeout=self._timeout_seconds,
-            shell=False,
-        )
+
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                cwd=str(cwd) if cwd else None,
+                timeout=self._timeout_seconds,
+                shell=False,
+            )
+
+        except subprocess.TimeoutExpired as exc:
+            raise TimeoutError(
+                f"Process exceeded timeout ({self._timeout_seconds} seconds).\n"
+                f"Command: {' '.join(command)}"
+            ) from exc
+
         if completed.returncode != 0:
-            raise ProcessExecutionError(command, completed.returncode, completed.stderr)
+            raise ProcessExecutionError(
+                command,
+                completed.returncode,
+                completed.stderr,
+            )
+
         return ProcessResult(
-            stdout=completed.stdout, stderr=completed.stderr, returncode=completed.returncode
+            stdout=completed.stdout,
+            stderr=completed.stderr,
+            returncode=completed.returncode,
         )
