@@ -941,11 +941,10 @@ is written to the structured log.""")
     save_btn.click(fn=save_voice, inputs=[voice_name, ref_audio1, ref_text1], outputs=[lib_status, saved_dd, saved_dd2, podcast_voices_dd, replace_voice])
     del_btn.click(fn=delete_voice, inputs=[saved_dd], outputs=[lib_status, saved_dd, saved_dd2, podcast_voices_dd, replace_voice])
 
-if __name__ == "__main__":
-    print("Launching Advanced Voice Studio...")
-    print(f"Saved Voices: {get_saved_voices()}")
-    interface.launch(
-        server_name=os.environ.get("VOICE_STUDIO_BIND_HOST", "127.0.0.1"),
-        inbrowser=os.environ.get("VOICE_STUDIO_BIND_HOST") is None,
-        css=custom_css,
-    )
+interface.launch(
+    server_name="0.0.0.0",
+    server_port=7860,
+    share=True,
+    inbrowser=False,
+    css=custom_css,
+)
