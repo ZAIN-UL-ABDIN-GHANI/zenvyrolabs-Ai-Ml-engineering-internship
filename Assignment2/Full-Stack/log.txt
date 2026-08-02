@@ -1,0 +1,34 @@
+U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\google\api_core\_python_version_support.py:254: FutureWarning: You are using a Python version (3.10.0) which Google will stop supporting in new releases of google.api_core once it reaches its end of life (2026-10-04). Please upgrade to the latest Python version, or at least Python 3.11, to continue receiving updates for google.api_core past that date.
+  warnings.warn(message, FutureWarning)
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\huggingface_hub\file_download.py:746: UserWarning: Not enough free disk space to download the file. The expected file size is: 1348.65 MB. The target location C:\Users\Admin\.cache\huggingface\hub\models--SWivid--F5-TTS\blobs only has 967.67 MB free disk space.
+  warnings.warn(
+Traceback (most recent call last):
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 196, in _run_module_as_main
+    return _run_code(code, main_globals, None,
+  File "C:\Users\Admin\AppData\Local\Programs\Python\Python310\lib\runpy.py", line 86, in _run_code
+    exec(code, run_globals)
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\Scripts\f5-tts_infer-cli.exe\__main__.py", line 2, in <module>
+    from f5_tts.infer.infer_cli import main
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\f5_tts\infer\infer_cli.py", line 291, in <module>
+    ckpt_file = str(cached_path(f"hf://SWivid/{repo_name}/{model}/model_{ckpt_step}.{ckpt_type}"))
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\cached_path\_cached_path.py", line 211, in cached_path
+    file_path, etag = get_from_cache(
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\cached_path\_cached_path.py", line 319, in get_from_cache
+    return hf_get_from_cache(url, cache_dir), None
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\cached_path\schemes\hf.py", line 60, in hf_get_from_cache
+    return hf_hub_download(model_identifier, filename, cache_dir)
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\cached_path\schemes\hf.py", line 36, in hf_hub_download
+    hf_hub.hf_hub_download(
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\huggingface_hub\utils\_validators.py", line 88, in _inner_fn
+    return fn(*args, **kwargs)
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\huggingface_hub\file_download.py", line 1019, in hf_hub_download
+    return _hf_hub_download_to_cache_dir(
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\huggingface_hub\file_download.py", line 1242, in _hf_hub_download_to_cache_dir
+    _download_to_tmp_and_move(
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\huggingface_hub\file_download.py", line 1932, in _download_to_tmp_and_move
+    xet_get(
+  File "U:\zenvyrolabsinternship\Assignment2\Full-Stack\venv\lib\site-packages\huggingface_hub\file_download.py", line 565, in xet_get
+    with session.new_file_download_group(
+RuntimeError: Task error: File reconstruction error: IO Error: There is not enough space on the disk. (os error 112)
+Download Vocos from huggingface charactr/vocos-mel-24khz
