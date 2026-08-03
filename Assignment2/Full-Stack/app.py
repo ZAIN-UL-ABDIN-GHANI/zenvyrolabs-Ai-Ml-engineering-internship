@@ -1,13 +1,46 @@
 import os
+import platform
+from pathlib import Path
 os.environ["NUMBA_DISABLE_JIT"] = "1"
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-os.environ["HF_HOME"] = os.path.join(BASE_DIR, "hf_cache")
-TEMP_DIR = os.path.join(BASE_DIR, "temp")
-os.makedirs(TEMP_DIR, exist_ok=True)
-os.environ["TEMP"] = TEMP_DIR
-os.environ["TMP"] = TEMP_DIR
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(os.environ.get("VOICE_STUDIO_ROOT", BASE_DIR)).resolve()
+
+
+def _ensure_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _resolve_venv_executable(venv_name: str, executable_name: str) -> Path:
+    if platform.system() == "Windows":
+        candidates = [
+            PROJECT_ROOT / venv_name / "Scripts" / f"{executable_name}.exe",
+            PROJECT_ROOT / venv_name / "Scripts" / executable_name,
+        ]
+    else:
+        candidates = [
+            PROJECT_ROOT / venv_name / "bin" / executable_name,
+            PROJECT_ROOT / venv_name / "bin" / f"{executable_name}.exe",
+        ]
+
+    resolved = shutil.which(executable_name)
+    if resolved:
+        candidates.append(Path(resolved))
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+HF_CACHE_DIR = _ensure_dir(PROJECT_ROOT / "hf_cache")
+TEMP_DIR = _ensure_dir(PROJECT_ROOT / "temp")
+OUTPUTS_DIR = _ensure_dir(PROJECT_ROOT / "outputs")
+os.environ["HF_HOME"] = str(HF_CACHE_DIR)
+os.environ["TEMP"] = str(TEMP_DIR)
+os.environ["TMP"] = str(TEMP_DIR)
 import tempfile
-tempfile.tempdir = TEMP_DIR
+tempfile.tempdir = str(TEMP_DIR)
 
 import gradio as gr
 import subprocess
@@ -30,20 +63,18 @@ from voice_studio.audio_processing import AudioStitcher, TrainingAudioPreprocess
 from voice_studio.infrastructure import configure_logging, correlation_scope, get_logger, DependencyHealthChecker
 from pydub.exceptions import CouldntDecodeError
 
-SAVED_VOICES_DIR = os.path.join(BASE_DIR, "saved_voices")
-os.makedirs(SAVED_VOICES_DIR, exist_ok=True)
+SAVED_VOICES_DIR = _ensure_dir(PROJECT_ROOT / "saved_voices")
 
-EDGE_TTS_EXE = os.path.join(BASE_DIR, "venv", "Scripts", "edge-tts.exe")
-F5_TTS_EXE = os.path.join(BASE_DIR, "venv", "Scripts", "f5-tts_infer-cli.exe")
-RVC_MODELS_DIR = os.path.join(BASE_DIR, "rvc_models")
-RVC_PYTHON_EXE = os.path.join(BASE_DIR, "rvc_venv", "Scripts", "python.exe")
-RVC_INFER_SCRIPT = os.path.join(BASE_DIR, "rvc_infer.py")
-os.makedirs(RVC_MODELS_DIR, exist_ok=True)
+EDGE_TTS_EXE = _resolve_venv_executable("venv", "edge-tts")
+F5_TTS_EXE = _resolve_venv_executable("venv", "f5-tts_infer-cli")
+RVC_MODELS_DIR = _ensure_dir(PROJECT_ROOT / "rvc_models")
+RVC_PYTHON_EXE = _resolve_venv_executable("rvc_venv", "python")
+RVC_INFER_SCRIPT = PROJECT_ROOT / "rvc_infer.py"
 
 # ─── Utility: Run edge-tts via subprocess (avoids asyncio conflicts with Gradio) ───
 def run_edge_tts(text, voice, output_path, rate=None, pitch=None):
     cmd = [
-        EDGE_TTS_EXE,
+        str(EDGE_TTS_EXE),
         "--voice", voice,
         "--text", text,
         "--write-media", output_path,
@@ -131,10 +162,10 @@ def run_rvc_conversion(input_audio, model_name, pitch):
     if not model_name: return None, "Please select an RVC model (.pth)."
     
     model_path = os.path.join(RVC_MODELS_DIR, model_name)
-    output_path = os.path.join(BASE_DIR, "rvc_output.wav")
+    output_path = os.path.join(OUTPUTS_DIR, "rvc_output.wav")
     
     cmd = [
-        RVC_PYTHON_EXE, RVC_INFER_SCRIPT,
+        str(RVC_PYTHON_EXE), str(RVC_INFER_SCRIPT),
         "--model", model_path,
         "--input", input_audio,
         "--output", output_path,
@@ -155,7 +186,7 @@ def run_rvc_conversion(input_audio, model_name, pitch):
 
 # ─── F5-TTS Core Engine ───
 def run_f5tts(text, ref_audio_path, ref_text, output_name="output_cloned.wav"):
-    output_path = os.path.join(BASE_DIR, output_name)
+    output_path = os.path.join(OUTPUTS_DIR, output_name)
     trimmed = os.path.join(TEMP_DIR, "trimmed_ref_gen.wav")
 
     audio = AudioSegment.from_file(ref_audio_path)
@@ -176,7 +207,7 @@ def run_f5tts(text, ref_audio_path, ref_text, output_name="output_cloned.wav"):
             return None, f"Failed to transcribe reference audio: {ref_text}"
 
     import tomli_w
-    config_path = os.path.join(BASE_DIR, "inference_config.toml")
+    config_path = os.path.join(OUTPUTS_DIR, "inference_config.toml")
     config_dict = {
         "model": "F5TTS_Base", "ref_audio": trimmed,
         "ref_text": ref_text.strip(),
@@ -206,7 +237,7 @@ def run_f5tts(text, ref_audio_path, ref_text, output_name="output_cloned.wav"):
         return output_path, f"✅ Generated {len(data)/sr:.1f}s audio"
 
     import glob
-    wavs = glob.glob(os.path.join(BASE_DIR, "infer_cli_*.wav"))
+    wavs = glob.glob(os.path.join(OUTPUTS_DIR, "infer_cli_*.wav"))
     if wavs:
         latest = max(wavs, key=os.path.getmtime)
         return latest, f"✅ Found: {os.path.basename(latest)}"
@@ -282,7 +313,7 @@ def generate_hindi(text, voice_id, use_transliteration, speed, pitch, progress=g
         else:
             status.append("Text already in Devanagari.")
 
-    output_path = os.path.join(TEMP_DIR, "hindi_output.mp3")
+    output_path = os.path.join(OUTPUTS_DIR, "hindi_output.mp3")
 
     rate_arg = f"{speed:+d}%" if speed != 0 else None
     pitch_arg = f"{pitch:+d}Hz" if pitch != 0 else None
@@ -401,7 +432,7 @@ def generate_podcast(script_text, pause_ms, progress=gr.Progress()):
     for seg in audio_segments[1:]:
         final = final + pause + seg
 
-    output_path = os.path.join(BASE_DIR, "podcast_output.wav")
+    output_path = os.path.join(OUTPUTS_DIR, "podcast_output.wav")
     final.export(output_path, format="wav")
     log_lines.append(f"✅ Final podcast: {len(final)/1000:.1f}s total")
 
@@ -414,7 +445,7 @@ def edit_audio_trim(audio_path, start_s, end_s):
         audio = AudioSegment.from_file(audio_path)
         start_ms, end_ms = int(start_s * 1000), int(end_s * 1000)
         trimmed = audio[start_ms:end_ms]
-        out = os.path.join(BASE_DIR, "edited_audio.wav")
+        out = os.path.join(OUTPUTS_DIR, "edited_audio.wav")
         trimmed.export(out, format="wav")
         return out, f"✅ Trimmed: Kept {start_s}s to {end_s}s"
     except Exception as e:
@@ -426,7 +457,7 @@ def edit_audio_cut(audio_path, start_s, end_s):
         audio = AudioSegment.from_file(audio_path)
         start_ms, end_ms = int(start_s * 1000), int(end_s * 1000)
         cut = audio[:start_ms] + audio[end_ms:]
-        out = os.path.join(BASE_DIR, "edited_audio.wav")
+        out = os.path.join(OUTPUTS_DIR, "edited_audio.wav")
         cut.export(out, format="wav")
         return out, f"✅ Cut: Removed {start_s}s to {end_s}s"
     except Exception as e:
@@ -452,7 +483,7 @@ def edit_audio_replace(audio_path, start_s, end_s, text, voice_name, progress=gr
         new_seg = AudioSegment.from_file(new_path)
         final = audio[:start_ms] + new_seg + audio[end_ms:]
         
-        out = os.path.join(BASE_DIR, "edited_audio.wav")
+        out = os.path.join(OUTPUTS_DIR, "edited_audio.wav")
         final.export(out, format="wav")
         return out, f"✅ Replaced {start_s}s to {end_s}s with new generated audio."
     except Exception as e:

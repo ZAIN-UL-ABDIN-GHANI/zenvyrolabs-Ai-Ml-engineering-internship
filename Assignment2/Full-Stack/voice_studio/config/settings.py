@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import shutil
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -14,8 +15,29 @@ def _project_root() -> Path:
 
 def _venv_executable(venv_dir: Path, name: str) -> Path:
     if platform.system() == "Windows":
-        return venv_dir / "Scripts" / f"{name}.exe"
-    return venv_dir / "bin" / name
+        candidates = [
+            venv_dir / "Scripts" / f"{name}.exe",
+            venv_dir / "Scripts" / name,
+        ]
+    else:
+        candidates = [
+            venv_dir / "bin" / name,
+            venv_dir / "bin" / f"{name}.exe",
+        ]
+
+    resolved = shutil.which(name)
+    if resolved:
+        candidates.append(Path(resolved))
+
+    for candidate in candidates:
+        if candidate.exists():
+            return candidate
+    return candidates[0]
+
+
+def _ensure_dir(path: Path) -> Path:
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def _env_flag(name: str, default: bool = False) -> bool:
@@ -42,36 +64,23 @@ class PathSettings:
         resolved_root = (root or _project_root()).resolve()
         primary_venv = resolved_root / "venv"
         rvc_venv = resolved_root / "rvc_venv"
+        temp_dir = _ensure_dir(resolved_root / "temp")
+        saved_voices_dir = _ensure_dir(resolved_root / "saved_voices")
+        rvc_models_dir = _ensure_dir(resolved_root / "rvc_models")
+        training_data_dir = _ensure_dir(resolved_root / "training_data")
+        hf_cache_dir = _ensure_dir(resolved_root / "hf_cache")
 
         return cls(
             root=resolved_root,
-            temp_dir=resolved_root / "temp",
-            saved_voices_dir=resolved_root / "saved_voices",
-            rvc_models_dir=resolved_root / "rvc_models",
-            training_data_dir=resolved_root / "training_data",
-            hf_cache_dir=resolved_root / "hf_cache",
+            temp_dir=temp_dir,
+            saved_voices_dir=saved_voices_dir,
+            rvc_models_dir=rvc_models_dir,
+            training_data_dir=training_data_dir,
+            hf_cache_dir=hf_cache_dir,
             edge_tts_executable=_venv_executable(primary_venv, "edge-tts"),
             f5_tts_executable=_venv_executable(primary_venv, "f5-tts_infer-cli"),
             rvc_python_executable=_venv_executable(rvc_venv, "python"),
         )
-        
-@classmethod
-def from_root(cls, root: Path | None = None) -> PathSettings:
-    resolved_root = (root or _project_root()).resolve()
-    primary_venv = resolved_root / "venv"
-    rvc_venv = resolved_root / "rvc_venv"
-
-    return cls(
-        root=resolved_root,
-        temp_dir=resolved_root / "temp",
-        saved_voices_dir=resolved_root / "saved_voices",
-        rvc_models_dir=resolved_root / "rvc_models",
-        training_data_dir=resolved_root / "training_data",
-        hf_cache_dir=resolved_root / "hf_cache",
-        edge_tts_executable=_venv_executable(primary_venv, "edge-tts"),
-        f5_tts_executable=_venv_executable(primary_venv, "f5-tts_infer-cli"),
-        rvc_python_executable=_venv_executable(rvc_venv, "python"),
-    )
 
 @classmethod
 def discover(cls) -> "PathSettings":
