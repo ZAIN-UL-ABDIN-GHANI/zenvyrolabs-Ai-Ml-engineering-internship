@@ -3,35 +3,30 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
+
     image: zenvyrolabs/voice-studio:latest
     container_name: voice-studio
+    init: true
+
     ports:
       - "7860:7860"
-    volumes:
-      - saved_voices:/app/saved_voices       # Voice Store   (SDS §14)
-      - rvc_models:/app/rvc_models           # Model Store   (SDS §14)
-      - training_data:/app/training_data     # Training Store (SDS §14)
-      - logs:/app/logs                       # Logging output (SDS §16)
-      - hf_cache:/app/hf_cache               # Engine model/download cache
-environment:
-  HF_TOKEN: ${HF_TOKEN}
-  HF_HOME: ${HF_HOME}
-  MPLBACKEND: ${MPLBACKEND}
-  VOICE_STUDIO_F5TTS_MODEL: ${VOICE_STUDIO_F5TTS_MODEL}
-  VOICE_STUDIO_NARRATION_VOICE: ${VOICE_STUDIO_NARRATION_VOICE}
-  VOICE_STUDIO_AUTO_ROUTE_PRONUNCIATION: ${VOICE_STUDIO_AUTO_ROUTE_PRONUNCIATION}
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-    restart: unless-stopped
 
-volumes:
-  saved_voices:
-  rvc_models:
-  training_data:
-  logs:
-  hf_cache:
+    volumes:
+      - ./saved_voices:/app/saved_voices
+      - ./rvc_models:/app/rvc_models
+      - ./training_data:/app/training_data
+      - ./logs:/app/logs
+      - ./hf_cache:/app/hf_cache
+      - ./temp:/app/temp
+      - ./outputs:/app/outputs
+
+    environment:
+      HF_TOKEN: ${HF_TOKEN:-}
+      HF_HOME: /app/hf_cache
+      MPLBACKEND: Agg
+      VOICE_STUDIO_ROOT: /app
+      VOICE_STUDIO_F5TTS_MODEL: ${VOICE_STUDIO_F5TTS_MODEL:-F5TTS_Base}
+      VOICE_STUDIO_NARRATION_VOICE: ${VOICE_STUDIO_NARRATION_VOICE:-en-US-GuyNeural}
+      VOICE_STUDIO_AUTO_ROUTE_PRONUNCIATION: ${VOICE_STUDIO_AUTO_ROUTE_PRONUNCIATION:-true}
+
+    restart: unless-stopped
