@@ -497,19 +497,21 @@ http://localhost:7860
 
 ---
 
-# Docker Volumes
+# Docker Bind Mounts
 
-The application stores data in persistent Docker volumes.
+The application stores data in bind-mounted host folders.
 
-| Volume | Purpose |
-|---------|---------|
+| Host folder | Purpose |
+|-------------|---------|
 | saved_voices | Saved voice profiles |
 | training_data | Voice training datasets |
 | rvc_models | RVC model storage |
 | hf_cache | Hugging Face model cache |
 | logs | Application logs |
+| temp | Temporary working files |
+| outputs | Generated audio and inference artifacts |
 
-These volumes persist even if the container is removed.
+These folders remain directly accessible from the project directory on the host.
 
 ---
 
