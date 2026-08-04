@@ -7,6 +7,9 @@
 # against the fork/release actually intended for rvc_infer.py before
 # building this image — see the Stage 1 Analysis, F-02, for the specific
 # API mismatch to check for (VoiceClone/.infer vs RVCInference/.infer_file).
+# Keep the RVC runtime on the same CPU-only PyTorch line as the main app.
+torch==2.13.0+cpu
+torchaudio==2.13.0+cpu
 rvc-python
 faiss-cpu
 soundfile
