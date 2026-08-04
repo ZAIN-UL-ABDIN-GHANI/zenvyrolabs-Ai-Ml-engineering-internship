@@ -1,3 +1,5 @@
+# syntax=docker/dockerfile:1.7
+
 FROM python:3.10-slim-bookworm
 
 ARG DEBIAN_FRONTEND=noninteractive
@@ -5,8 +7,10 @@ ARG TORCH_INDEX_URL=https://download.pytorch.org/whl/cpu
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PIP_NO_CACHE_DIR=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_DEFAULT_TIMEOUT=3600 \
+    PIP_RETRIES=5 \
+    PIP_CACHE_DIR=/root/.cache/pip \
     VOICE_STUDIO_ROOT=/app \
     VOICE_STUDIO_BIND_HOST=0.0.0.0 \
     HF_HOME=/app/hf_cache \
@@ -20,24 +24,43 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         curl \
         ffmpeg \
         git \
+        libgomp1 \
         libsndfile1 \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
+RUN printf '%s\n' \
+        '#!/bin/sh' \
+        'set -eu' \
+    'retries=0' \
+        'while true; do' \
+        '  "$@" && exit 0' \
+    '  retries=$((retries + 1))' \
+    '  if [ "$retries" -gt 5 ]; then exit 1; fi' \
+    '  echo "pip command failed; retrying in 120 seconds (retry ${retries}/5)" >&2' \
+        '  sleep 120' \
+        'done' \
+    > /usr/local/bin/pip-retry \
+    && chmod +x /usr/local/bin/pip-retry
+
 COPY requirements.txt ./
 COPY requirements-rvc.txt ./
 
-RUN python -m venv venv \
-    && venv/bin/python -m pip install --upgrade pip setuptools wheel \
-    && venv/bin/pip install --no-cache-dir torch torchvision torchaudio --index-url "${TORCH_INDEX_URL}" \
-    && venv/bin/pip install --no-cache-dir -r requirements.txt
+RUN --mount=type=cache,id=pip-cache,target=/root/.cache/pip,sharing=locked \
+    python -m venv venv \
+    && /usr/local/bin/pip-retry venv/bin/python -m pip install --upgrade pip setuptools wheel \
+    && /usr/local/bin/pip-retry venv/bin/pip install --index-url "${TORCH_INDEX_URL}" \
+        torch==2.13.0+cpu \
+        torchvision==0.18.0+cpu \
+        torchaudio==2.13.0+cpu \
+    && /usr/local/bin/pip-retry venv/bin/pip install -r requirements.txt
 
-RUN python -m venv rvc_venv \
-    # rvc-python pulls omegaconf==2.0.6, which pip 24.1+ rejects during metadata parsing.
-    && rvc_venv/bin/python -m pip install --upgrade pip==24.0 setuptools wheel \
-    && rvc_venv/bin/pip install --no-cache-dir torch torchaudio --index-url "${TORCH_INDEX_URL}" \
-    && rvc_venv/bin/pip install --no-cache-dir -r requirements-rvc.txt
+RUN --mount=type=cache,id=pip-cache,target=/root/.cache/pip,sharing=locked \
+    python -m venv rvc_venv \
+    && /usr/local/bin/pip-retry rvc_venv/bin/python -m pip install --upgrade pip==24.0 setuptools wheel \
+    && /usr/local/bin/pip-retry rvc_venv/bin/pip install --index-url "${TORCH_INDEX_URL}" torch==2.13.0+cpu torchaudio==2.13.0+cpu \
+    && /usr/local/bin/pip-retry rvc_venv/bin/pip install -r requirements-rvc.txt
 
 COPY . .
 
